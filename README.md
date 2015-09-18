@@ -10,7 +10,8 @@
 
 ```sql
 SELECT Quarantine.Uploads.UploadID INTO NewUploadID 
-FROM Quarantine.Uploads LEFT OUTER JOIN Quarantine.Directories ON Quarantine.Uploads.UploadID = Quarantine.Directories.UploadID 
+FROM Quarantine.Uploads LEFT OUTER JOIN Quarantine.Directories 
+  ON Quarantine.Uploads.UploadID = Quarantine.Directories.UploadID 
 WHERE Quarantine.Directories.UploadID IS NULL ORDER BY Quarantine.Uploads.UploadID ASC LIMIT 1;
 ```
 
