@@ -2,40 +2,41 @@
 
 export PATH=~:$PATH
 
-x=20110409_12642.nii.gz
-y=$(basename $x .nii.gz)
-z=bia5_20110409_12642_003_01_00001.dcm
+id_base=$1
+
+x=${1}_0000.nii.gz
+y=$1
+z=bia5_${1}_003_01_00001.dcm
+[ -f $z ] || z=bia5_${1}_300_01_00001.dcm
 
 nifti2dicom 	-i  $x \
 		-o  $y \
-		--acquisitiontime $(dcm 8 32 $z) \
-		--acquisitiondate $(dcm 8 22 $z) \
-		--seriestime $(dcm 8 31 $z) \
-		--acquisitionnumber $(dcm 20 12 $z) \
-		--seriesdate $(dcm 8 21 $z ) \
-		--seriesdescription  $(dcm 8 103e $z ) \ 
-		--seriesnumber  $(dcm 20 11 $z) \
-		--seriesinstanceuid $(dcm 20 e $z) \
-		--donotuseoriginalstudy
-		--studytime $(dcm 8 30 $z) \
-		--studydate $(dcm 8 20 $z) \
-		--studydescription $(dcm 8 1030 $z) \
-		--studyid $(dcm 20 10 $z) \
-		--studyinstanceuid $(dcm 20 d $z) \
-		--patientweight  $(dcm 10 1030 $z) \
-		--patientage  $(dcm 10 1010 $z) \
-		--patientsex  $(dcm 10 40 $z) \
-		--patientdob $(dcm 10 30 $z) \
-		--referringphysiciansname  $(dcm 8 90 $z) \
-		--institutionname  $(dcm 8 80 $z) \
-		--manufacturersmodelname  $(dcm 8 1090 $z) \
-		--manufacturer  $(dcm 8 70 $z) \
-		--protocolname  $(dcm 18 1030 $z) \
-		--softwareversion $(dcm 18 1020 $z) \
-		--imagetype "DERIVED\SECONDARY"
-		--modality $(dcm 8 60 $z) \
-		--sopclassuid $(dcm 8 16 $z) \
-		--dicomheaderfile $z
-		--accessionnumber $(dcm 8 50 $z)
+		--acquisitiontime "$(dcm 8 32 $z)" \
+		--acquisitiondate "$(dcm 8 22 $z)" \
+		--seriestime "$(dcm 8 31 $z)" \
+		--acquisitionnumber "$(dcm 20 12 $z)" \
+		--seriesdate "$(dcm 8 21 $z )" \
+		--seriesdescription  "Resting State fMRI" --seriesnumber  "$(( $(dcm 20 11 $z) + 1  ))" \
+		--studytime "$(dcm 8 30 $z)" \
+		--studydate "$(dcm 8 20 $z)" \
+		--studydescription "$(dcm 8 1030 $z)" \
+		--studyid "$(dcm 20 10 $z)" \
+		--studyinstanceuid "$(dcm 20 d $z)" \
+		--patientweight  "$(dcm 10 1030 $z)" \
+		--patientage  "$(dcm 10 1010 $z)" \
+		--referringphysiciansname  "$(dcm 8 90 $z)" \
+		--institutionname  "$(dcm 8 80 $z)" \
+		--manufacturersmodelname  "$(dcm 8 1090 $z)" \
+		--manufacturer  "$(dcm 8 70 $z)" \
+		--protocolname  "$(dcm 18 1030 $z)" \
+		--softwareversion "$(dcm 18 1020 $z)" \
+		--imagetype "DERIVED\SECONDARY" \
+		--modality "$(dcm 8 60 $z)" \
+		--sopclassuid "$(dcm 8 16 $z)" \
+		--dicomheaderfile "$z" \
+		--accessionnumber "NIFTI2DICOM"
 
-		
+#		--seriesinstanceuid "$(dcm 20 e $z)" \		
+#		--donotuseoriginalstudy \
+#		--patientsex  "$(dcm 10 40 $z)" \ls -tlr
+ 
