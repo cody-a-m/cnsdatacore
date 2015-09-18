@@ -1,6 +1,7 @@
-# cnsdatacore
+# CNS Data Core
+## Code & Procedures
 
-## Upload polling
+### Upload polling
 1. Webserver code inserts tuple into Quarantine.Uploads, receiving an UploadID in return.
 2. A new directory under $REPO_TEMP/Uploads/ is created with the UploadID as the directory name.
 3. Data are stored in the the directory.
