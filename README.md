@@ -12,7 +12,6 @@ IF NewUploadID IS NULL THEN
 ELSE
   SELECT NewUploadID;
 END IF;
-```
 
 - [x] Add Completed field to Quarantine.Uploads;
 - [ ] Add upload code to UPDATE Completed field to 1 (TRUE) upon completion.
