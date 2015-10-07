@@ -16,9 +16,7 @@ UploadFile=( $(ls -1 $UploadDir) )
 UploadFileType=$(file --brief --mime-type --preserve-date $UploadDir/$UploadFile)
 
 QuarantineDir=${UploadDir/UPLOADS/QUARANTINE}/${UploadFile}_extracted
-[ -d $QuarantineDir ] && exit
-
-mkdir -pv $QuarantineDir
+[ -d $QuarantineDir ] || mkdir -pv $QuarantineDir
 
 case $UploadFileType in 
 	application/zip) unzip $UploadDir/$UploadFile -d $QuarantineDir ;;
@@ -33,6 +31,6 @@ case $NetworkID in
 		[ ${#BASH_REMATCH[1]} -eq 4 ] || exit
 		[ ${#BASH_REMATCH[2]} -eq 6 ] || exit
 		PatientID=${BASH_REMATCH[1]}${BASH_REMATCH[2]}
-		find $QuarantineDir -type f | push+fix $UploadID {} $PatientID
+		find $QuarantineDir -type f | parallel --no-notice --jobs /tmp/procfile ./push+fix.sh $UploadID {} $PatientID
 		;;
 esac
