@@ -25,11 +25,8 @@ export TEMPDIR=/dev/shm/upload
 	newPatientID="$3"
 	uploadDir=$(mktemp --directory --tmpdir=$TEMPDIR)
 
-	origMTime=$(stat -c%y "$origDICOM")
-
 	[ $uploadID -ge 0 ] && [[ $(file -b "$origDICOM") =~ DICOM\ medical\ imaging\ data ]] || exit
-	FileSetID=$(dcm 4 1130 "$origDICOM" 2>&1)
-	[ "${FileSetID:-X}" != X ] && err_cleanup
+	FileSetID=$(dcm 4 1130 "$origDICOM" 2>&1) && [ "${FileSetID:-X}" != X ] && err_cleanup
 
 	cp --dereference -p "$origDICOM" $uploadDir/
 	uploadFile=$uploadDir/${origDICOM##*/}
@@ -72,7 +69,7 @@ export TEMPDIR=/dev/shm/upload
 	mv "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
 
 	newRAW="$REPOROOT/RAWDATA/$StudyImageID/${uploadFile##*/}"
-	touch -m -d"${origMTime}" "$newRAW"
+	touch -m --reference="$origDICOM" "$newRAW"
 	newMD5=($(md5sum "$newRAW"))
 	[ ${newMD5:-foobar} != $uploadMD5 ] && printf "Error in file %s part of StudyImage %d\n" "$origDICOM" $StudyImageID && err_cleanup
 

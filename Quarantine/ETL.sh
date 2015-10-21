@@ -31,6 +31,6 @@ case $NetworkID in
 		[ ${#BASH_REMATCH[1]} -eq 4 ] || exit
 		[ ${#BASH_REMATCH[2]} -eq 6 ] || exit
 		PatientID=${BASH_REMATCH[1]}${BASH_REMATCH[2]}
-		find $QuarantineDir -type f | parallel --no-notice --jobs /tmp/procfile ./push+fix.sh $UploadID {} $PatientID
+		find $QuarantineDir -type f | parallel --no-notice --jobs /tmp/procfile ~/cnsdatacore/Quarantine/Uploads/push+fix.sh $UploadID {} $PatientID
 		;;
 esac
