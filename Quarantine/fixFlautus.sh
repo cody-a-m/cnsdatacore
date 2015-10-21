@@ -1,52 +1,75 @@
 #!/bin/bash
+set -e
+trap exit_cleanup EXIT
+trap err_cleanup ERR
+
+function exit_cleanup() {
+	rm -r "$uploadDir"
+	exit
+}
+
+function err_cleanup() {
+	[ ${StudyImageID:-0} -gt 0 ] && echo "$origDICOM" >> $REPOROOT/PROBLEM_WITH_$StudyImageID
+	[ ${StudyImageID:-0} -eq 0 ] && echo "$origDICOM $FileSetID" >> $REPOROOT/PROBLEM_WITH_0_RAWDICOM
+	exit_cleanup
+}
 
 export LC_ALL=C
 export PATH=/mnt/data/imaging/dcmtk/bin:$PATH
 export DCMDICTPATH=/mnt/data/imaging/dcmtk/share/dcmtk/dicom.dic:/mnt/data/imaging/dcmtk/share/dcmtk/private.dic
+export REPOROOT=/mnt/data/new
+export TEMPDIR=/dev/shm/upload
 
-	replDICOM=$1
-	replPatientID=$2
+	uploadID=$1
+	origDICOM="$2"
+	newPatientID="$3"
+	uploadDir=$(mktemp --directory --tmpdir=$TEMPDIR)
 
+	[ $uploadID -ge 0 ] && [[ $(file -b "$origDICOM") =~ DICOM\ medical\ imaging\ data ]] || exit
+	FileSetID=$(dcm 4 1130 "$origDICOM" 2>&1) && [ "${FileSetID:-X}" != X ] && err_cleanup
 
-	origDICOM=$3
+	cp --dereference -p "$origDICOM" $uploadDir/
+	uploadFile=$uploadDir/${origDICOM##*/}
 
-#dcm00080033=$(dcm  8   33 $origDICOM) # content time -- most specific timestamp
-#dcm00080008=$(dcm  8    8 $origDICOM) # image type
-#dcm00080018=$(dcm  8   18 $origDICOM) # sop instance uid
-#dcm00080020=$(dcm  8   20 $origDICOM) # study date
-#dcm00080070=$(dcm  8   70 $origDICOM) # manufacturer
-dcm00080080=$(dcm  8   80 $origDICOM) # institution
-#dcm00081010=$(dcm  8 1010 $origDICOM) # station name
-dcm00081030=$(dcm  8 1030 $origDICOM) # study description
-dcm0008103e=$(dcm  8 103e $origDICOM) # series description
-#dcm00081090=$(dcm  8 1090 $origDICOM) # model name
-dcm00100010=$(dcm 10   10 $origDICOM) # patient name
-dcm00100020=$(dcm 10   20 $origDICOM) # patient id
-dcm00181030=$(dcm 18 1030 $origDICOM) # protocol name
-#dcm0020000d=$(dcm 20    d $origDICOM) # study instance uid
-#dcm0020000e=$(dcm 20    e $origDICOM) # series instance uid
-#dcm00200011=$(dcm 20   11 $origDICOM) # series number
+	# Modification of PatientID & PatientName
+	if [[ $# -eq 3 && ${#newPatientID} -gt 0 ]]; then
+		dcmodify -nb -m "(0010,0010)=$newPatientID" -m "(0010,0020)=$newPatientID" "$uploadFile"
+	fi	
+	uploadMD5=($(md5sum $uploadFile))
 
-#printf "%s\t%s\t%s\t%s\t%s\n" ${dcm00080080:-A} ${dcm00081090:-B} ${dcm00100010:-C} ${dcm00100020:-D} $dcm00200011
+	if [ "$(dcm 8 70 $uploadFile)" == "Philips Medical Systems" ]; then
+		dcm2xml "$uploadFile" | xsltproc /mnt/data/DICOM/SCRIPTS/required_set.xsl - > "${uploadFile}.xml"
+	else
+		dcm2xml "$uploadFile" "${uploadFile}.xml"
+	fi
 
-#if [ ${#dcm00080033} -eq 0 ]; then echo  content time -- most specific timestamp; fi
-#if [ ${#dcm00080008} -eq 0 ]; then echo  image type; fi
-#if [ ${#dcm00080018} -eq 0 ]; then echo  sop instance uid; fi
-#if [ ${#dcm00080020} -eq 0 ]; then echo  study date; fi
-#if [ ${#dcm00080070} -eq 0 ]; then echo  manufacturer; fi
-#if [ ${#dcm00080080} -eq 0 ]; then echo  institution; fi
-#if [ ${#dcm00081010} -eq 0 ]; then echo  station name; fi
-#if [ ${#dcm00081030} -eq 0 ]; then echo  study description; fi
-#if [ ${#dcm0008103e} -eq 0 ]; then echo  series description; fi
-#if [ ${#dcm00081090} -eq 0 ]; then echo  model name; fi
-#if [ ${#dcm00100020} -eq 0 ]; then echo  patient id; fi
-#if [ ${#dcm00181030} -eq 0 ]; then echo  protocol name; fi
-#if [ ${#dcm0020000d} -eq 0 ]; then echo  study instance uid; fi
-#if [ ${#dcm0020000e} -eq 0 ]; then echo  series instance uid; fi
-#if [ ${#dcm00200011} -eq 0 ]; then echo  series number; fi
-#
-#institution
-#station name
-#study description
-#series description
-#protocol name
+	chmod -R 777 $uploadDir
+
+	if [ ${uploadID:-0} -eq 0 ]; then
+		sql=$(printf 'SELECT getUploadIDHeuristic(\047%s\047);' "$(dcm 8 1030 $uploadFile)")
+		uploadID=$(mysql --silent --silent --raw -uroot  Quarantine -e "$sql")
+		[ $uploadID -le 0 ] && exit
+	fi
+
+	sql=$(printf 'CALL pushXMLUploadToRepository(\047%s\047,\047%s\047,\047%s\047,%d);' "${origDICOM}" $uploadMD5 "${uploadFile}.xml" $uploadID)
+
+	StudyImageID=$(mysql  --silent --silent --max_allowed_packet=2G --raw -uroot  Quarantine -e "$sql")
+
+	if [[ ${StudyImageID:-X} =~ [^0-9] || ${StudyImageID} -le 0 ]]; then
+		printf "%s: %s \n" "$origDICOM" $StudyImageID
+		exit
+	fi
+
+	InstanceNumber=$(dcm 20 13 "$uploadFile")
+	[ $InstanceNumber -le 0 ] && echo "$origDICOM has invalid InstanceNumber" && err_cleanup
+
+	[ -d $REPOROOT/RAWDATA/$StudyImageID ] || mkdir -pv $REPOROOT/{RAWDATA,XML}/$StudyImageID
+	[ -d $REPOROOT/XML/$StudyImageID ] || mkdir -pv $REPOROOT/{RAWDATA,XML}/$StudyImageID
+	mv  "$uploadFile" $REPOROOT/RAWDATA/$StudyImageID/
+	mv "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
+
+	newRAW="$REPOROOT/RAWDATA/$StudyImageID/${uploadFile##*/}"
+	touch -m --reference="$origDICOM" "$newRAW"
+	newMD5=($(md5sum "$newRAW"))
+	[ ${newMD5:-foobar} != $uploadMD5 ] && printf "Error in file %s part of StudyImage %d\n" "$origDICOM" $StudyImageID && err_cleanup
+
