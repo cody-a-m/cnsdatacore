@@ -1,0 +1,48 @@
+#!/bin/bash
+
+#GZIP_OPT=-9 
+
+function exit_usage () {
+	printf "repo_push_dir -u <upload_id> -d <source_directory> [ -s <subject_id> ] -o\nsubject_id is optional.\noverwrite (-o) is optional.\n"
+	exit 1
+}
+
+[ $# -le 8 -a $# -ge 4 ] || exit_usage
+
+while getopts "u:d:s:m:o" opt
+do
+ case $opt in
+  u) upload_id=$OPTARG;;
+  d) source_dir=$OPTARG;;
+  s) subject_id=$OPTARG;;
+  m) dcm_modification="$OPTARG";;
+  o) overwrite=1;;
+ esac
+done
+
+[[ $upload_id =~ [^0-9] ]] && exit_usage
+[ $upload_id -gt 0 -a ${source_dir:-x} == 'x' -a -d /data/QUARANTINE/$upload_id/image_file ] && source_dir=/data/QUARANTINE/$upload_id/image_file
+[ -d "${source_dir}" ] || exit_usage
+
+export TMPDIR=/dev/shm/upload
+repo_push_log=$(mktemp --tmpdir=$TMPDIR)
+
+find "${source_dir}" -type f | parallel --no-notice --jobs /tmp/procfile /usr/local/bin/repo_push_file -u $upload_id -f {} ${subject_id:+-s } $subject_id ${dcm_modification:+-m \"}${dcm_modification}${dcm_modification:+\"}  ${overwrite:+-o} | while IFS=':' read -a t
+do
+	>&2 printf "Processing files %d\r" $(( iteration++ )) 
+	[ ! -f "${t[3]}" ] && [ ${t[0]} -gt 0 ] && [ ${t[1]} -gt 0 ] && >&2 echo "${t[@]}"
+	source_path="${t[2]%/*}"
+	source_path="${source_path#*/image_file/}"
+	printf "%s:%s:%s:%s:%d\n" "${t[0]}" "${t[1]}" "${source_path}" "${t[3]%/*}" ${#source_path}
+done > $repo_push_log
+
+max_source_length=$(cut -d: -f5 $repo_push_log | sort -n | tail -n1)
+echo
+
+printf "%7s %4s %6s %-${max_source_length}s %-20s\n" COUNT Sess SImgID "Quarantine_Path" "Repo_Path"
+while IFS=":" read -a t
+do
+	printf "%4d %6d %-${max_source_length}s %-20s\n"  ${t[0]} ${t[1]} "${t[2]}" "${t[3]}"
+done < $repo_push_log | sort -k1,2 -t' ' -n --compress-program=/bin/gzip | uniq -c 
+
+rm -rf "$repo_push_log"
