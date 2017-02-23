@@ -3,17 +3,14 @@ set -e
 trap exit_cleanup EXIT
 trap err_cleanup ERR
 
-#export debug=$4
 function exit_cleanup() {
-	[ $? -gt 0 ] || rm -r "$uploadDir" #&>> $REPOROOT/error_log_$(date +%Y%m%d)
+	[ $? -eq 0 ] && [ ${DEBUG:-0} -eq 0 ] && rm -r "$uploadDir"
 	exit
 }
 
 function err_cleanup() {
-#	[ ${StudyImageID:-0} -gt 0 ] && echo "$origDICOM" >> $REPOROOT/PROBLEM_WITH_$StudyImageID
-#	[ ${StudyImageID:-0} -eq 0 ] && echo "$origDICOM $FileSetID" >> $REPOROOT/PROBLEM_WITH_0_RAWDICOM
-	[ ${StudyImageID:-0} -gt 0 ] && echo "$origDICOM" | gfput --append glfs://painrepo/gv0/logs/PROBLEM_WITH_$StudyImageID
-	[ ${StudyImageID:-0} -eq 0 ] && echo "$origDICOM $FileSetID" | gfput --append glfs://painrepo/gv0/logs/PROBLEM_WITH_0_RAWDICOM
+	[ ${StudyImageID:-0} -gt 0 ] && echo "$origDICOM" | gfput --append --parents glfs://localhost/gv0/data/LOGS/PROBLEM_WITH_$StudyImageID
+	[ ${StudyImageID:-0} -eq 0 ] && echo "$origDICOM $FileSetID" | gfput --append --parents glfs://localhost/gv0/data/LOGS/PROBLEM_WITH_0_RAWDICOM
 	exit 1
 }
 
@@ -21,7 +18,6 @@ export LC_ALL=C
 export PATH=/mnt/data/imaging/dcmtk/bin:$PATH
 export DCMDICTPATH=/mnt/data/imaging/dcmtk/share/dcmtk/dicom.dic:/mnt/data/imaging/dcmtk/share/dcmtk/private.dic
 export REPOROOT=/mnt/gluster/gv0/data
-#export REPOROOT=glfs://painrepo/gv0/data
 export TEMPDIR=/dev/shm/upload
 
 declare -a REMOVE_DICOM_FIELDS=(
@@ -31,7 +27,7 @@ declare -a REMOVE_DICOM_FIELDS=(
 	0010,1030
 )
 
-while getopts "u:f:s:m:o" opt
+while getopts "u:f:s:m:og" opt
 do
  case $opt in
   u) uploadID="$OPTARG";;
@@ -39,15 +35,21 @@ do
   s) newPatientID=$OPTARG;;
   m) DCM_MODIFICATION="$OPTARG";;
   o) OVERWRITE=1;;
+  g) export DEBUG=1;;
  esac
 done
 
+#t1=$(file --brief --mime-type "$origDICOM")
+#t2="application/zip; charset=binary"
+	filetype=$(file --brief --mime-type "$origDICOM")
+	if [ "${filetype:-dummy}" == "application/zip" -a ! -d "${origDICOM}_extracted" ]; then
+		mkdir "${origDICOM}_extracted"
+		unzip -u "$origDICOM" -d "${origDICOM}_extracted/" 2>&1 >/dev/null
+		find "${origDICOM}_extracted/" -type f | parallel --no-notice --jobs /tmp/procfile /usr/local/bin/repo_push_file -u $uploadID -f {} ${newPatientID:+-s } $newPatientID ${DCM_MODIFICATION:+-m \"}${DCM_MODIFICATION}${DCM_MODIFICATION:+\"}  ${OVERWRITE:+-o} 
+		exit
+	fi
 
-#	uploadID=$1
-#	origDICOM="$2"
-#	newPatientID="$3"
-#	[ $# -eq 4 -a ${#4} -gt 0 ] && DCM_MODIFICATION="$4"
-	[ $uploadID -ge 0 ] && [[ $(file -b "$origDICOM") =~ DICOM\ medical\ imaging\ data ]] || exit
+	[ $uploadID -ge 0  -a  ${filetype:-dummy} == "application/dicom" ] || exit
 
 	FileSetID=$(dcm 4 1130 "$origDICOM" 2>&1) && [ "${FileSetID:-X}" != X ] && err_cleanup
 	ImageType=$(dcm 8    8 "$origDICOM") && [[ $ImageType =~ CSA\ REPORT ]] && exit_cleanup
@@ -56,6 +58,8 @@ done
 	cp --sparse=always --dereference -p "$origDICOM" $uploadDir/
 	uploadFile=$uploadDir/${origDICOM##*/}
 
+	# Hack to handle UCLA naming of MAPP2 scans
+	[ ${origDICOM:0:24} == "/data/QUARANTINE/0/0201_" ] && newPatientID=${origDICOM:19:4}${origDICOM:24:6}
 	# Modification of PatientID & PatientName
 	if [[ $DCM_MODIFICATION =~ \([0-9]{4},[0-9a-f]{4}\)\=.+ ]]; then
 		dcmodify -nb --ignore-missing-tags  -m "(0010,0010)=$newPatientID" -m "(0010,0020)=$newPatientID" -m "$DCM_MODIFICATION"  $(for f in ${REMOVE_DICOM_FIELDS[@]}; do printf ' -e (%s) ' $f; done)  "$uploadFile"
@@ -71,12 +75,6 @@ done
 	fi
 
 	chmod -R 777 $uploadDir
-
-#	if [ ${uploadID:-0} -eq 0 ]; then
-#		sql=$(printf 'SELECT getUploadIDHeuristic(\047%s\047);' "$(dcm 8 1030 $uploadFile)")
-#		uploadID=$(mysql --silent --silent --raw -uroot  Quarantine -e "$sql")
-#		[ $uploadID -le 0 ] && exit
-#	fi
 
 	sql=$(printf 'CALL proc_load(\047%s\047,\047%s\047,\047%s\047,%d,%i);' "${origDICOM}" $uploadMD5 "${uploadFile}.xml" $uploadID ${OVERWRITE:-0})
 
@@ -96,22 +94,15 @@ done
 	[ ${AcquisitionNumber:-0} -le 0 ] && echo "Invalid Acquisition Number ($AcquisitionNumber): $origDICOM" && err_cleanup
 	[ ${InstanceNumber:-0} -le 0 ] && echo "Invalid Instance Number: $origDICOM" && err_cleanup
 
-#	[ -d $REPOROOT/RAWDATA/$StudyImageID ] || mkdir -p $REPOROOT/{RAWDATA,XML}/$StudyImageID
-#	[ -d $REPOROOT/XML/$StudyImageID ] || mkdir -p $REPOROOT/{RAWDATA,XML}/$StudyImageID
-#	gfmkdir $REPOROOT/RAWDATA/$StudyImageID && gfmkdir $REPOROOT/XML/$StudyImageID
 	mkdir -p $REPOROOT/{RAWDATA,XML}/$StudyImageID
 	if [ ${#newPatientID} -gt 0 ]; then
-		newDICOM=$REPOROOT/RAWDATA/$StudyImageID/$(printf "%s_ser%02d_acq%02d_img%05d.dcm" "$newPatientID" $SeriesNumber $AcquisitionNumber $InstanceNumber)
+		newDICOM=$REPOROOT/RAWDATA/$StudyImageID/$(printf "%s_ser%02d_acq%03d_img%05d.dcm" "$newPatientID" $SeriesNumber $AcquisitionNumber $InstanceNumber)
 		cp -p "$uploadFile" "$newDICOM"
 		cp -p "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
-		#gfcp "$uploadFile" "$newDICOM"
-		#gfcp "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
 	else
 		newDICOM="$REPOROOT/RAWDATA/$StudyImageID/${uploadFile##*/}"
 		cp -p "$uploadFile" $REPOROOT/RAWDATA/$StudyImageID/
 		cp -p "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
-		#gfcp "$uploadFile" $REPOROOT/RAWDATA/$StudyImageID/
-		#gfcp "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
 	fi
 
 	touch -m --reference="$origDICOM" "$newDICOM"
