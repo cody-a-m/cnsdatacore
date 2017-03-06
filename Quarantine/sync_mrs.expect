@@ -1,0 +1,13 @@
+#!/usr/bin/expect -f
+exp_internal 0 ;# expect debugging
+
+set timeout -1
+
+spawn /usr/bin/rsync -rtuv -e ssh --out-format="%n"  dns0.bmap.ucla.edu:/Volumes/BMC9/MRIFILE/MAYERMRIFILE/ /mnt/gluster/gv0/data/MRS/MAYERMRIFILE/
+
+match_max 1000000
+
+expect "Password:"
+send -- "tuxisbetter\r"
+
+expect -re ".*sent \[0-9]+ bytes" {}

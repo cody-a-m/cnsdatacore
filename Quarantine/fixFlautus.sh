@@ -23,6 +23,12 @@ export TEMPDIR=/dev/shm/upload
 	uploadID=$1
 	origDICOM="$2"
 	newPatientID="$3"
+	institution="$4"
+	seriesDesc="$5"
+	studyDesc="$6"
+	protocolName="$7"
+	studyInstanceUID="$8"
+
 	uploadDir=$(mktemp --directory --tmpdir=$TEMPDIR)
 
 	[ $uploadID -ge 0 ] && [[ $(file -b "$origDICOM") =~ DICOM\ medical\ imaging\ data ]] || exit
@@ -32,16 +38,17 @@ export TEMPDIR=/dev/shm/upload
 	uploadFile=$uploadDir/${origDICOM##*/}
 
 	# Modification of PatientID & PatientName
-	if [[ $# -eq 3 && ${#newPatientID} -gt 0 ]]; then
-		dcmodify -nb -m "(0010,0010)=$newPatientID" -m "(0010,0020)=$newPatientID" "$uploadFile"
-	fi	
+	dcmodify -nb 	-m "(0008,0080)=$institution" \
+			-m "(0008,1030)=$studyDesc" \
+			-m "(0008,103e)=$seriesDesc" \
+			-m "(0010,0010)=$newPatientID" \
+		     	-m "(0010,0020)=$newPatientID" \
+		  	-m "(0018,1030)=$protocolName" \
+		  	-m "(0020,000d)=$studyInstanceUID" \
+			"$uploadFile"
 	uploadMD5=($(md5sum $uploadFile))
 
-	if [ "$(dcm 8 70 $uploadFile)" == "Philips Medical Systems" ]; then
-		dcm2xml "$uploadFile" | xsltproc /mnt/data/DICOM/SCRIPTS/required_set.xsl - > "${uploadFile}.xml"
-	else
-		dcm2xml "$uploadFile" "${uploadFile}.xml"
-	fi
+	dcm2xml "$uploadFile" "${uploadFile}.xml"
 
 	chmod -R 777 $uploadDir
 

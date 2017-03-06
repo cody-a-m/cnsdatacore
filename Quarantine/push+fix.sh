@@ -4,7 +4,7 @@ trap exit_cleanup EXIT
 trap err_cleanup ERR
 
 function exit_cleanup() {
-	rm -r "$uploadDir"
+#	rm -r "$uploadDir"
 	exit
 }
 

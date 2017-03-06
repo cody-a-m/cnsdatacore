@@ -1,0 +1,20 @@
+#!/usr/bin/expect -f
+exp_internal 0 ;# expect debugging
+
+set timeout -1
+
+spawn /usr/bin/rsync -rtuv -e ssh --out-format="%n"  dns0.bmap.ucla.edu:/Volumes/BMC9/dicom6/MAYERGROUP/ /mnt/gluster/gv0/data/QUARANTINE/0/
+
+match_max 1000000
+
+expect "Password:"
+send -- "tuxisbetter\r"
+expect -re ".*receiving file list ... .*" {}
+expect -re "done.*$" unset expect_out(buffer)
+expect -re ".*sent \[0-9]+ bytes" { 
+	set sync_paths $expect_out(buffer)
+	foreach line [split $sync_paths "\r"] {
+		puts [string trim $line "\r\n"]
+	}
+}
+#		if {[file isfile [concat "/data/QUARANTINE/0/" $path]]} { puts $path }
