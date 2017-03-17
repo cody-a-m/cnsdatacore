@@ -28,11 +28,12 @@ fi
 
 if [ ${IN_MEMORY:-0} -eq 1 ]; then
 	d=/dev/shm/DWW/$sid
+	mkdir -pv $d /data/DWW/$sid
 else
 	d=/data/DWW/$sid
+	mkdir -pv $d 
 fi
 
-mkdir -pv $d
 echo $sid $fsd >> $d/dww.log
 echo "Including wdtfit" >> $d/dww.log
 
