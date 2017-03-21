@@ -1,6 +1,14 @@
 sid=$1
 s=$(mysql -Brs ImagingRepositoryV6 -e "select concat_ws('_',SubjectName,replace(ScanDate,'-','')) from StudyImageInfo where StudyImageID=${sid};")
-fsd=($(mysql -Brs ImagingRepositoryV6 -e "select StudyImageID from StudyImageInfo where ModalityID=2 and ScanSessionID=(select ScanSessionID from StudyImageInfo where StudyImageID=${sid});"))
+
+if [ -e /data/DWW/$sid/dww.log ]; then
+	read sidagain fsd</data/DWW/$sid/dww.log
+	[ $sid -ne $sidagain ] && echo mismatch && exit
+	[ ${fsd:-0} -gt 0 ] || exit
+else
+	fsd=($(mysql -Brs ImagingRepositoryV6 -e "select StudyImageID from StudyImageInfo where ModalityID=2 and ScanSessionID=(select ScanSessionID from StudyImageInfo where StudyImageID=${sid});"))
+fi
+
 [ ${#fsd[@]} -gt 1 ] && echo "Multiple structural associated with this scan" && exit
 [ ! -f /data/FS/$fsd/stats/aseg.stats ] && echo "Missing Freesurfer stats" && exit
 #[ ${#s} -eq 0 -a -e $d/count_0.txt ] && echo "$d bad" && continue
