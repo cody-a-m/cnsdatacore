@@ -24,7 +24,7 @@ if [ ${fsd:-0} -eq 0 -o ${#fsd} -eq 0 ]; then
 fi
 
 [ -f /data/DWW/$sid/count_0.txt ] && echo "$sid already processed" && exit
-[ ! -d /data/FS/$fsd ] && echo "Freesurfer parcellation missing" && exit
+[ ! -d /data/FS/${fsd:-0} ] && echo "Freesurfer parcellation missing" && exit
 
 if [ ${IN_MEMORY:-0} -eq 1 ]; then
 	d=/dev/shm/DWW/$sid
