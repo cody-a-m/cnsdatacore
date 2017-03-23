@@ -6,7 +6,7 @@ if [ -e /data/DWW/$sid/dww.log ]; then
 	read sidagain fsd</data/DWW/$sid/dww.log
 	[ $sid -ne $sidagain ] && echo mismatch && exit
 	[ ${fsd:-0} -gt 0 ] || exit
-elif [ ${fsd:-0} -ne 0 ]; then
+elif [ ${fsd:-0} -eq 0 ]; then
 	fsd=($(mysql -Brs ImagingRepositoryV6 -e "select StudyImageID from StudyImageInfo where ModalityID=2 and ScanSessionID=(select ScanSessionID from StudyImageInfo where StudyImageID=${sid});"))
 fi
 
