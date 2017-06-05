@@ -8,13 +8,14 @@ export PATH=/data/DWW/camino-code/bin:$PATH
 export CAMINO_HEAP_SIZE=2000
 export FSLOUTPUTTYPE=NIFTI_GZ
 
-while getopts "i:f:vm" opt
+while getopts "i:f:vmo" opt
 do
  case $opt in
   i) sid="$OPTARG";;
   f) fsd="$OPTARG";;
   v) export VIEWER=1;;
   m) export IN_MEMORY=1;;
+  o) export OVERWRITE=1;;
  esac
 done
 
@@ -23,7 +24,7 @@ if [ ${fsd:-0} -eq 0 -o ${#fsd} -eq 0 ]; then
 	[ ${#fsd[@]} -gt 1 ] && echo "Multiple structural associated with this scan" && exit
 fi
 
-[ -f /data/DWW/$sid/count_0.txt ] && echo "$sid already processed" && exit
+[ $OVERWRITE -eq 0 -a -f /data/DWW/$sid/count_0.txt ] && echo "$sid already processed" && exit
 [ ! -d /data/FS/${fsd:-0} ] && echo "Freesurfer parcellation missing" && exit
 
 if [ ${IN_MEMORY:-0} -eq 1 ]; then
@@ -52,6 +53,8 @@ echo "Including wdtfit" >> $d/dww.log
 [ -f $d/A.scheme            ] || fsl2scheme -bvecfile $d/rawdwi.bvec -bvalfile $d/rawdwi.bval > $d/A.scheme
 [ -f $d/A.scheme            ] || exit
 
+[ -f $d/A.fixed.scheme ] && cp --force --verbose $d/A.fixed.scheme $d/A.scheme
+
 [ -f $d/rawdwi_bet.nii.gz      ] || bet $d/rawdwi.nii.gz $d/rawdwi_bet -m -f 0.1
 [ -f $d/rawdwi_bet.nii.gz      ] || exit
 
@@ -63,6 +66,7 @@ echo "Including wdtfit" >> $d/dww.log
 [ -f $d/pre_dt.Bdouble      ] || modelfit -inputfile $d/pre_dwi.Bfloat  -schemefile $d/A.scheme -model ldt -bgmask  $d/rawdwi_bet.nii.gz -outputfile  $d/pre_dt.Bdouble
 [ -f $d/pre_dt.Bdouble      ] || exit
 
+# The following two steps aren't needed for automated processing
 #dteig function used to create the eigensystem of the tensors
 [ -f $d/pre_dteig.Bdouble   ] || dteig <$d/pre_dt.Bdouble > $d/pre_dteig.Bdouble 
 [ -f $d/pre_dteig.Bdouble   ] || exit
@@ -87,6 +91,7 @@ wait
 [ -f $d/dwi.Bfloat          ] || image2voxel -4dimage $d/dwi.eddy.nii.gz -outputfile  $d/dwi.Bfloat
 [ -f $d/dwi.Bfloat          ] || exit
 
+# Fixed vectors will be used here 
 [ -f $d/dt.Bdouble          ] || modelfit -inputfile $d/dwi.Bfloat -schemefile $d/A.scheme  -model ldt -bgmask $d/dwi.bet_mask.nii.gz -outputfile $d/dt.Bdouble
 [ -f $d/dt.Bdouble          ] || exit
 
