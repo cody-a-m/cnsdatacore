@@ -9,8 +9,8 @@ function exit_cleanup() {
 }
 
 function err_cleanup() {
-	[ ${StudyImageID:-0} -gt 0 ] && echo "$origDICOM" | gfput --append --parents glfs://localhost/gv0/data/LOGS/PROBLEM_WITH_$StudyImageID
-	[ ${StudyImageID:-0} -eq 0 ] && echo "$origDICOM $FileSetID" | gfput --append --parents glfs://localhost/gv0/data/LOGS/PROBLEM_WITH_0_RAWDICOM
+	[ ${StudyImageID:-0} -gt 0 ] && echo "$origDICOM" >> /data/LOGS/PROBLEM_WITH_$StudyImageID
+	[ ${StudyImageID:-0} -eq 0 ] && echo "$origDICOM $FileSetID" >> /data/LOGS/PROBLEM_WITH_0_RAWDICOM
 	exit 1
 }
 
@@ -94,19 +94,19 @@ done
 	[ ${AcquisitionNumber:-0} -le 0 ] && echo "Invalid Acquisition Number ($AcquisitionNumber): $origDICOM" && err_cleanup
 	[ ${InstanceNumber:-0} -le 0 ] && echo "Invalid Instance Number: $origDICOM" && err_cleanup
 
-	mkdir -p $REPOROOT/{RAWDATA,XML}/$StudyImageID
+	mkdir -p $REPOROOT/RAWDATA/$StudyImageID
 	if [ ${#newPatientID} -gt 0 ]; then
 		newDICOM=$REPOROOT/RAWDATA/$StudyImageID/$(printf "%s_ser%02d_acq%03d_img%05d.dcm" "$newPatientID" $SeriesNumber $AcquisitionNumber $InstanceNumber)
 		cp -p "$uploadFile" "$newDICOM"
-		cp -p "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
+#		cp -p "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
 	else
 		newDICOM="$REPOROOT/RAWDATA/$StudyImageID/${uploadFile##*/}"
 		cp -p "$uploadFile" $REPOROOT/RAWDATA/$StudyImageID/
-		cp -p "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
+#		cp -p "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
 	fi
 
 	touch -m --reference="$origDICOM" "$newDICOM"
 	newMD5=($(md5sum "$newDICOM"))
-	[ ${newMD5:-foobar} != $uploadMD5 ] && printf "Error in file %s part of StudyImage %d\n" "$origDICOM" $StudyImageID && err_cleanup
+	[ ${newMD5:-foobar} != $uploadMD5 ] && printf "Error: MD5 mismatch in file %s part of StudyImage %d\n" "$origDICOM" $StudyImageID && err_cleanup
 	printf "%s:%s:%s:%s\n" ${ScanSessionID:-0} $StudyImageID "$origDICOM" "$newDICOM"
 
