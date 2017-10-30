@@ -25,18 +25,26 @@ done
 [ -d "${source_dir}" ] || exit_usage
 
 export TMPDIR=/dev/shm/upload
-repo_push_log=$(mktemp --tmpdir=$TMPDIR)
+#repo_push_log=$(mktemp --tmpdir=$TMPDIR)
 
-find "${source_dir}" -type f | parallel --no-notice --jobs /tmp/procfile /usr/local/bin/repo_push_file -u $upload_id -f {} ${subject_id:+-s } $subject_id ${dcm_modification:+-m \"}${dcm_modification}${dcm_modification:+\"}  ${overwrite:+-o} | while IFS=':' read -a t
-do
-	>&2 printf "Processing files %d\r" $(( iteration++ )) 
-	[ ! -f "${t[3]}" -a ${t[0]} -gt 0 -a  ${t[1]} -gt 0 ] && >&2 echo "${t[@]}"
-	source_path="${t[2]%/*}"
-	source_path="${source_path#*/image_file/}"
-	printf "%s:%s:%s:%s:%d\n" "${t[0]}" "${t[1]}" "${source_path}" "${t[3]%/*}" ${#source_path}
-done > $repo_push_log
+find "${source_dir}" -type f | parallel --no-notice --jobs /tmp/procfile --progress /root/code/cnsdatacore/Quarantine/repo_push_file -u $upload_id -f {} ${subject_id:+-s } $subject_id ${dcm_modification:+-m \"}${dcm_modification}${dcm_modification:+\"}  ${overwrite:+-o}
+
+
+# | while IFS=':' read -a t
+#do
+#	>&2 printf "Processing files %d\r" $(( iteration++ )) 
+#	[ ! -f "${t[3]}" -a ${t[0]} -gt 0 -a  ${t[1]} -gt 0 ] && >&2 echo "${t[@]}"
+#	source_path="${t[2]%/*}"
+#	source_path="${source_path#*/image_file/}"
+#	printf "%s:%s:%s:%s:%d\n" "${t[0]}" "${t[1]}" "${source_path}" "${t[3]%/*}" ${#source_path}
+#done > $repo_push_log
 
 mysql --raw --batch --silent Quarantine -e "update Quarantine.Uploads set Completed=2 where UploadID=${upload_id}"
+
+exit
+
+
+
 
 max_source_length=$(cut -d: -f5 $repo_push_log | sort -n | tail -n1)
 echo

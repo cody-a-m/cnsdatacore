@@ -1,10 +1,10 @@
 #!/bin/bash
-set -e
-trap exit_cleanup EXIT
-trap err_cleanup ERR
+#set -e
+#trap exit_cleanup EXIT
+#trap err_cleanup ERR
 
 function exit_cleanup() {
-	[ $? -eq 0 ] && [ ${DEBUG:-0} -eq 0 ] && rm -r "$uploadDir"
+	[ $? -eq 0 -a ${DEBUG:-0} -eq 0 -a -d "${uploadDir:-foo}" ] && rm -r "$uploadDir"
 	exit
 }
 
@@ -39,8 +39,6 @@ do
  esac
 done
 
-#t1=$(file --brief --mime-type "$origDICOM")
-#t2="application/zip; charset=binary"
 	filetype=$(file --brief --mime-type "$origDICOM")
 	if [ "${filetype:-dummy}" == "application/zip" -a ! -d "${origDICOM}_extracted" ]; then
 		mkdir "${origDICOM}_extracted"
@@ -52,7 +50,8 @@ done
 	[ $uploadID -ge 0  -a  ${filetype:-dummy} == "application/dicom" ] || exit
 
 	FileSetID=$(dcm 4 1130 "$origDICOM" 2>&1) && [ "${FileSetID:-X}" != X ] && err_cleanup
-	ImageType=$(dcm 8    8 "$origDICOM") && [[ $ImageType =~ CSA\ REPORT ]] && exit_cleanup
+#	ImageType=$(dcm 8    8 "$origDICOM") && [[ $ImageType =~ REPORT || $ImageType =~ DIS2D$ || $ImageType =~ ^DERIVED || $ImageType =~ ND$ ]] && exit_cleanup
+	ImageType=$(dcm 8    8 "$origDICOM") && [[ $ImageType =~ ^DERIVED|MOCO|REPORT|DIS2D$|ND$|^$ ]] && exit_cleanup
 
 	uploadDir=$(mktemp --directory --tmpdir=$TEMPDIR)
 	cp --sparse=always --dereference -p "$origDICOM" $uploadDir/
@@ -66,7 +65,19 @@ done
 	elif [[ ${#newPatientID} -gt 0 ]]; then
 		dcmodify -nb --ignore-missing-tags  -m "(0010,0010)=$newPatientID" -m "(0010,0020)=$newPatientID"  $(for f in ${REMOVE_DICOM_FIELDS[@]}; do printf ' -e (%s) ' $f; done)  "$uploadFile"
 	fi	
+	
+	SeriesInstanceUID=$(dcm 20 e "$uploadFile")
+	while [ -f $TEMPDIR/$SeriesInstanceUID -a ${StudyImageID:-0} -eq 0 ] 
+	do
+		sleep $(( RANDOM % 2 + 1 ))
+		read StudyImageID <$TEMPDIR/$SeriesInstanceUID
+	done
+	[ ! -f $TEMPDIR/$SeriesInstanceUID ] && touch $TEMPDIR/$SeriesInstanceUID
+
 	uploadMD5=($(md5sum $uploadFile))
+[ ${StudyImageID:-0} -lt 0 ] && exit_cleanup
+
+if [ ${StudyImageID:-0} -eq 0 ]; then
 
 	if [ "$(dcm 8 70 $uploadFile)" == "Philips Medical Systems" ]; then
 		dcm2xml "$uploadFile" | xsltproc /mnt/data/DICOM/SCRIPTS/required_set.xsl - > "${uploadFile}.xml"
@@ -80,13 +91,17 @@ done
 
 	read -a sql_results <<<$(mysql  --silent --silent --max_allowed_packet=2G --raw -uroot  Quarantine -e "$sql")
 	StudyImageID=${sql_results[0]}
-
+	
 	if [[ ${StudyImageID:-X} =~ [^0-9] || ${StudyImageID} -le 0 ]]; then
-		printf "0:%s:%s:NULL\n" $StudyImageID "$origDICOM"
+		#printf "0:%s:%s:NULL\n" $StudyImageID "$origDICOM"
+		printf "%s: %s\n" "$origDICOM" "${sql_results[@]}"
+		printf "%d" $StudyImageID > $TEMPDIR/$SeriesInstanceUID
 		exit
+	else
+		printf "%d" $StudyImageID > $TEMPDIR/$SeriesInstanceUID
 	fi
-	ScanSessionID=${sql_results[1]}
-
+#	ScanSessionID=${sql_results[1]}
+fi
 	SeriesNumber=$(dcm 20 11 "$uploadFile")
 	AcquisitionNumber=$(dcm 20 12 "$uploadFile")
 	InstanceNumber=$(dcm 20 13 "$uploadFile")
@@ -94,19 +109,19 @@ done
 	[ ${AcquisitionNumber:-0} -le 0 ] && echo "Invalid Acquisition Number ($AcquisitionNumber): $origDICOM" && err_cleanup
 	[ ${InstanceNumber:-0} -le 0 ] && echo "Invalid Instance Number: $origDICOM" && err_cleanup
 
+	chmod -R 775 "$uploadFile"
+
 	mkdir -p $REPOROOT/RAWDATA/$StudyImageID
 	if [ ${#newPatientID} -gt 0 ]; then
 		newDICOM=$REPOROOT/RAWDATA/$StudyImageID/$(printf "%s_ser%02d_acq%03d_img%05d.dcm" "$newPatientID" $SeriesNumber $AcquisitionNumber $InstanceNumber)
 		cp -p "$uploadFile" "$newDICOM"
-#		cp -p "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
 	else
 		newDICOM="$REPOROOT/RAWDATA/$StudyImageID/${uploadFile##*/}"
 		cp -p "$uploadFile" $REPOROOT/RAWDATA/$StudyImageID/
-#		cp -p "${uploadFile}.xml" $REPOROOT/XML/$StudyImageID/$(printf "%05d".xml $InstanceNumber)
 	fi
 
 	touch -m --reference="$origDICOM" "$newDICOM"
 	newMD5=($(md5sum "$newDICOM"))
 	[ ${newMD5:-foobar} != $uploadMD5 ] && printf "Error: MD5 mismatch in file %s part of StudyImage %d\n" "$origDICOM" $StudyImageID && err_cleanup
-	printf "%s:%s:%s:%s\n" ${ScanSessionID:-0} $StudyImageID "$origDICOM" "$newDICOM"
+#	printf "%s:%s:%s:%s\n" ${ScanSessionID:-0} $StudyImageID "$origDICOM" "$newDICOM"
 
