@@ -1,0 +1,131 @@
+#!/bin/bash
+#set -e
+#trap exit_cleanup EXIT
+#trap err_cleanup ERR
+
+function exit_cleanup() {
+	[ $? -eq 0 -a ${DEBUG:-0} -eq 0 -a -d "${uploadDir:-foo}" ] && rm -r "$uploadDir"
+	exit
+}
+
+function err_cleanup() {
+	[ ${StudyImageID:-0} -gt 0 ] && echo "$origDICOM" >> /data/LOGS/PROBLEM_WITH_$StudyImageID
+	[ ${StudyImageID:-0} -eq 0 ] && echo "$origDICOM $FileSetID" >> /data/LOGS/PROBLEM_WITH_0_RAWDICOM
+	exit 1
+}
+
+export LC_ALL=C
+export PATH=/mnt/data/imaging/dcmtk/bin:$PATH
+export DCMDICTPATH=/mnt/data/imaging/dcmtk/share/dcmtk/dicom.dic:/mnt/data/imaging/dcmtk/share/dcmtk/private.dic
+export REPOROOT=/mnt/gluster/gv0/data
+export TEMPDIR=/dev/shm/upload
+
+declare -a REMOVE_DICOM_FIELDS=(
+	0010,0030
+	0010,0040
+	0010,1020
+	0010,1030
+)
+
+while getopts "u:f:s:m:og" opt
+do
+ case $opt in
+  u) uploadID="$OPTARG";;
+  f) origDICOM="$OPTARG";;
+  s) newPatientID=$OPTARG;;
+  m) DCM_MODIFICATION="$OPTARG";;
+  o) OVERWRITE=1;;
+  g) export DEBUG=1;;
+ esac
+done
+
+	filetype=$(file --brief --mime-type "$origDICOM")
+	if [ "${filetype:-dummy}" == "application/zip" -a ! -d "${origDICOM}_extracted" ]; then
+		mkdir "${origDICOM}_extracted"
+		unzip -u "$origDICOM" -d "${origDICOM}_extracted/" 2>&1 >/dev/null
+		find "${origDICOM}_extracted/" -type f | parallel --no-notice --jobs /tmp/procfile /usr/local/bin/repo_push_file -u $uploadID -f {} ${newPatientID:+-s } $newPatientID ${DCM_MODIFICATION:+-m \"}${DCM_MODIFICATION}${DCM_MODIFICATION:+\"}  ${OVERWRITE:+-o} 
+		exit
+	fi
+
+	[ $uploadID -ge 0  -a  ${filetype:-dummy} == "application/dicom" ] || exit
+
+	FileSetID=$(dcm 4 1130 "$origDICOM" 2>&1) && [ "${FileSetID:-X}" != X ] && err_cleanup
+#	ImageType=$(dcm 8    8 "$origDICOM") && [[ $ImageType =~ REPORT || $ImageType =~ DIS2D$ || $ImageType =~ ^DERIVED || $ImageType =~ ND$ ]] && exit_cleanup
+	ImageType=$(dcm 8    8 "$origDICOM") && [[ $ImageType =~ ^DERIVED|MOCO|REPORT|DIS2D$|ND$|^$ ]] && exit_cleanup
+
+#	uploadDir=$(mktemp --directory --tmpdir=$TEMPDIR)
+#	cp --sparse=always --dereference -p "$origDICOM" $uploadDir/
+#	uploadFile=$uploadDir/${origDICOM##*/}
+	uploadFile="$origDICOM"
+	origTimestamp=$(stat --printf="%Y" "$origDICOM")
+
+	# Hack to handle UCLA naming of MAPP2 scans
+#	[ ${origDICOM:0:24} == "/data/QUARANTINE/0/0201_" ] && newPatientID=${origDICOM:19:4}${origDICOM:24:6}
+	# Modification of PatientID & PatientName
+	if [[ $DCM_MODIFICATION =~ \([0-9]{4},[0-9a-f]{4}\)\=.+ ]]; then
+		dcmodify -nb --ignore-missing-tags  -m "(0010,0010)=$newPatientID" -m "(0010,0020)=$newPatientID" -m "$DCM_MODIFICATION"  $(for f in ${REMOVE_DICOM_FIELDS[@]}; do printf ' -e (%s) ' $f; done)  "$uploadFile"
+	elif [[ ${#newPatientID} -gt 0 ]]; then
+		dcmodify -nb --ignore-missing-tags  -m "(0010,0010)=$newPatientID" -m "(0010,0020)=$newPatientID"  $(for f in ${REMOVE_DICOM_FIELDS[@]}; do printf ' -e (%s) ' $f; done)  "$uploadFile"
+	fi	
+	
+	SeriesInstanceUID=$(dcm 20 e "$uploadFile")
+	while [ -f $TEMPDIR/$SeriesInstanceUID -a ${StudyImageID:-0} -eq 0 ] 
+	do
+		sleep $(( RANDOM % 2 + 1 ))
+		read StudyImageID <$TEMPDIR/$SeriesInstanceUID
+	done
+	[ ! -f $TEMPDIR/$SeriesInstanceUID ] && touch $TEMPDIR/$SeriesInstanceUID
+
+	uploadMD5=($(md5sum "$uploadFile"))
+[ ${StudyImageID:-0} -lt 0 ] && exit_cleanup
+
+if [ ${StudyImageID:-0} -eq 0 ]; then
+
+	if [ "$(dcm 8 70 $uploadFile)" == "Philips Medical Systems" ]; then
+		dcm2xml "$uploadFile" | xsltproc /mnt/data/DICOM/SCRIPTS/required_set.xsl - > "${uploadFile}.xml"
+	else
+		dcm2xml "$uploadFile" "${uploadFile}.xml"
+	fi
+
+#	chmod -R 777 $uploadDir
+	chmod -R 777 "${uploadFile}.xml"
+
+	sql=$(printf 'CALL proc_load(\047%s\047,\047%s\047,\047%s\047,%d,%i);' "${origDICOM}" $uploadMD5 "${uploadFile}.xml" $uploadID ${OVERWRITE:-0})
+
+	read -a sql_results <<<$(mysql  --silent --silent --max_allowed_packet=2G --raw -uroot  Quarantine -e "$sql")
+	StudyImageID=${sql_results[0]}
+	
+	if [[ ${StudyImageID:-X} =~ [^0-9] || ${StudyImageID} -le 0 ]]; then
+		#printf "0:%s:%s:NULL\n" $StudyImageID "$origDICOM"
+		printf "%s: %s\n" "$origDICOM" "${sql_results[@]}"
+		printf "%d" $StudyImageID > $TEMPDIR/$SeriesInstanceUID
+		exit
+	else
+		printf "%d" $StudyImageID > $TEMPDIR/$SeriesInstanceUID
+	fi
+#	ScanSessionID=${sql_results[1]}
+fi
+	SeriesNumber=$(dcm 20 11 "$uploadFile")
+	AcquisitionNumber=$(dcm 20 12 "$uploadFile")
+	InstanceNumber=$(dcm 20 13 "$uploadFile")
+	[ ${SeriesNumber:-0} -le 0 ] && echo "Invalid Series Number: $origDICOM" && err_cleanup
+	[ ${AcquisitionNumber:-0} -le 0 ] && echo "Invalid Acquisition Number ($AcquisitionNumber): $origDICOM" && err_cleanup
+	[ ${InstanceNumber:-0} -le 0 ] && echo "Invalid Instance Number: $origDICOM" && err_cleanup
+
+#	chmod -R 775 "$uploadFile"
+
+	mkdir -p $REPOROOT/RAWDATA/$StudyImageID
+	if [ ${#newPatientID} -gt 0 ]; then
+		newDICOM=$REPOROOT/RAWDATA/$StudyImageID/$(printf "%s_ser%02d_acq%03d_img%05d.dcm" "$newPatientID" $SeriesNumber $AcquisitionNumber $InstanceNumber)
+		cp -p "$uploadFile" "$newDICOM"
+	else
+		newDICOM="$REPOROOT/RAWDATA/$StudyImageID/${uploadFile##*/}"
+		cp -p "$uploadFile" $REPOROOT/RAWDATA/$StudyImageID/
+	fi
+
+#	touch -m --reference="$origDICOM" "$newDICOM"
+	touch -d @$origTimestamp "$newDICOM"
+	newMD5=($(md5sum "$newDICOM"))
+	[ ${newMD5:-foobar} != $uploadMD5 ] && printf "Error: MD5 mismatch in file %s part of StudyImage %d\n" "$origDICOM" $StudyImageID && err_cleanup
+#	printf "%s:%s:%s:%s\n" ${ScanSessionID:-0} $StudyImageID "$origDICOM" "$newDICOM"
+
