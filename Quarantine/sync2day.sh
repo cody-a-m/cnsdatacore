@@ -4,4 +4,4 @@
 /root/code/cnsdatacore/Quarantine/sync_mrs.expect
 
 
-/root/code/cnsdatacore/Quarantine/inQ.sh | while read d; do repo_push_dir -u 0 -d /data/QUARANTINE/0/$d; done
+/root/code/cnsdatacore/Quarantine/inQ.sh | while read d; do repo_push_dir -u 0 -d $d; done

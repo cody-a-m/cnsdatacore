@@ -27,7 +27,7 @@ done
 export TMPDIR=/dev/shm/upload
 #repo_push_log=$(mktemp --tmpdir=$TMPDIR)
 
-find "${source_dir}" -type f | parallel --no-notice --jobs /tmp/procfile --progress /root/code/cnsdatacore/Quarantine/repo_push_file -u $upload_id -f {} ${subject_id:+-s } $subject_id ${dcm_modification:+-m \"}${dcm_modification}${dcm_modification:+\"}  ${overwrite:+-o}
+find "${source_dir}" -type f | parallel --no-notice --jobs /tmp/procfile --progress /root/code/cnsdatacore/Quarantine/repo_push_file.sh -u $upload_id -f {} ${subject_id:+-s } $subject_id ${dcm_modification:+-m \"}${dcm_modification}${dcm_modification:+\"}  ${overwrite:+-o}
 
 
 # | while IFS=':' read -a t

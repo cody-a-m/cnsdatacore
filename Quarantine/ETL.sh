@@ -2,14 +2,14 @@
 shopt -s extglob
 export PATH=/usr/local/bin:$PATH
 
-[ -f /tmp/etl_lock ] && echo "Another upload is currently extracting." && exit
+[ -f /var/lock/etl_lock ] && echo "Another upload is currently extracting." && exit
 
 declare -i UploadID
 UploadID=$(mysql --batch --silent Quarantine -e "CALL pollUploads();")
 [ $UploadID -ge 0 ] || exit
-echo $UploadID > /tmp/etl_lock
+echo $UploadID > /var/lock/etl_lock
 
-rsync --recursive --times --update --progress --chmod=u+rwx,g+rwx,o-rwx --rsh="ssh -p2222 -lBoFH -T" webserver:/srv/www/upload/pain/$UploadID/ /mnt/gluster/gv0/data/UPLOADS/$UploadID/
+rsync --recursive --times --update --progress --whole-file --inplace --remove-source-files --chmod=u+rwx,g+rwx,o-rwx webserver::uploads/$UploadID/ /mnt/gluster/gv0/data/UPLOADS/$UploadID/
 
 quarantine_dir=/mnt/gluster/gv0/data/QUARANTINE/$UploadID
 mkdir -pv $quarantine_dir
@@ -20,11 +20,12 @@ if [ -d ${image_file_dir:-foo} ]; then
 	#[ ${#image_file} -gt 1 ] && exit
 	quarantine_image_file="${image_file_dir/UPLOADS/QUARANTINE}/${image_file}_extracted" && mkdir -pv "$quarantine_image_file"
 	case $(file --brief --mime-type --preserve-date $image_file_dir/$image_file) in
-	        application/x-tar)        tar -C  $quarantine_image_file -xf $image_file_dir/$image_file ;;
+	        application/x-tar)        tar -C  "$quarantine_image_file" -xf "$image_file_dir/$image_file" ;;
 	        application/zip)          unzip -q "$image_file_dir/$image_file" -d "$quarantine_image_file" ;;
-	        application/x-gzip)       tar -C $quarantine_image_file -xzf $image_file_dir/$image_file ;;
+	        application/x-gzip)       pigz -dc "$image_file_dir/$image_file" | tar -C "$quarantine_image_file" -xf - ;;
         	application/octet-stream) exit ;;
 	esac
+        rm /var/lock/etl_lock && echo "Finished extracting upload."
 	chgrp -R 2000 $quarantine_image_file
 	chmod -R 750 $quarantine_image_file
 	network_id=$(mysql --batch --silent Quarantine -e "CALL getNetworkID($UploadID)");
@@ -46,11 +47,10 @@ if [ -d ${image_file_dir:-foo} ]; then
 		PatientID=${BASH_REMATCH}
 		;;
 	esac
-        rm /tmp/etl_lock && echo "Finished extracting upload."
-	repo_push_dir -u $UploadID -d "${quarantine_image_file#/mnt/gluster/gv0}" -s $PatientID
+	/root/code/cnsdatacore/Quarantine/repo_push_dir -u $UploadID -d "${quarantine_image_file#/mnt/gluster/gv0}" -s $PatientID
 fi
 
-demographics_file_dir=$(ls -1d /mnt/gluster/gv0/data/UPLOADS/$UploadID/demographics_file*)
-if [ -d ${demographics_file_dir:-foo} ]; then
+demographics_file_dir=$(ls -1d /mnt/gluster/gv0/data/UPLOADS/$UploadID/demographics_file* 2>/dev/null)
+if [ $(ls -1 ${demographics_file_dir:-foo} 2>/dev/null | wc -l) -gt 0 ]; then
 	cp --preserve=time --recursive --verbose $demographics_file_dir  $quarantine_dir/
 fi

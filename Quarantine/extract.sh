@@ -27,7 +27,7 @@ if [ -d ${image_file_dir:-foo} ]; then
 	esac
         rm /var/lock/etl_lock && echo "Finished extracting upload."
 	chgrp -R 2000 $quarantine_image_file
-	chmod -R 750 $quarantine_image_file
+	chmod -R 755 $quarantine_image_file
 	network_id=$(mysql --batch --silent Quarantine -e "CALL getNetworkID($UploadID)");
 	case $network_id in
 	3)	[[ $image_file =~ ([0123456]{4})_?([0-9]{6}).* ]] || exit

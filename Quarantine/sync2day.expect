@@ -3,7 +3,8 @@ exp_internal 0 ;# expect debugging
 
 set timeout -1
 
-spawn /usr/bin/rsync -rtuv -e ssh --out-format="%n"  dns0.bmap.ucla.edu:/Volumes/BMC9/dicom6/MAYERGROUP/ /mnt/gluster/gv0/data/QUARANTINE/0/
+#spawn /usr/bin/rsync -rtuv -e ssh --out-format="%n"  dns0.bmap.ucla.edu:/Volumes/BMC9/dicom6/MAYERGROUP/ /mnt/gluster/gv0/data/QUARANTINE/0/
+spawn /usr/bin/rsync -rtuv -e ssh --out-format="n"  dns0.bmap.ucla.edu:/Volumes/BMC9/dicom6/MAYERGROUP/ /mnt/gluster/gv0/data/QUARANTINE/0/
 
 match_max 1000000
 

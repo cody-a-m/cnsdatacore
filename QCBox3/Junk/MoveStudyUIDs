@@ -1,0 +1,2 @@
+NewConn = ConnectToMySQL;
+DPaths = fetch(NewConn, 'SELECT SUBSTRING_INDEX(DirectoryPath, "/", 4), COUNT(FileID) FROM Quarantine.Files LEFT JOIN Quarantine.Directories ON Files.DirectoryID = Directories.DirectoryID WHERE Files.StudyUID IS NULL GROUP BY SUBSTRING_INDEX(DirectoryPath, "/", 4);');
